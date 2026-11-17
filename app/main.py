@@ -1,39 +1,114 @@
 import base64
 import hmac
+import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for
+from flask import (Flask, Response, flash, jsonify, redirect, render_template, request, session,
+                   url_for)
 
 from . import scanner, store
 
+log = logging.getLogger("sixy")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+app.config.update(
+    SESSION_COOKIE_NAME="sixy_session",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
+
+
+def clean_password(raw: str) -> str:
+    """Compose's list syntax keeps quotes literally (- ADMIN_PASSWORD="x"); strip them."""
+    pw = (raw or "").strip()
+    if len(pw) >= 2 and pw[0] == pw[-1] and pw[0] in "\"'":
+        log.warning("ADMIN_PASSWORD was wrapped in quotes; ignoring the quotes.")
+        pw = pw[1:-1]
+    return pw
+
+
+ADMIN_PASSWORD = clean_password(os.environ.get("ADMIN_PASSWORD", ""))
+PUBLIC_PATHS = {"/healthz", "/livez", "/login", "/logout"}
+
+
+def _password_ok(pw: str) -> bool:
+    return bool(ADMIN_PASSWORD) and hmac.compare_digest(pw.encode(), ADMIN_PASSWORD.encode())
+
+
+def _basic_auth_ok() -> bool:
+    """Still accepted so scripts/curl can use -u :password."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Basic "):
+        return False
+    try:
+        _, pw = base64.b64decode(auth[6:]).decode("utf-8", "replace").split(":", 1)
+    except Exception:
+        return False
+    return _password_ok(pw)
+
+
+def _allowed_hosts():
+    hosts = {request.host}
+    fwd = request.headers.get("X-Forwarded-Host")
+    if fwd:
+        hosts.add(fwd.split(",")[0].strip())
+    return hosts
 
 
 # ---------- auth + basic CSRF guard ----------
 @app.before_request
 def guard():
-    if request.path in ("/healthz",) or request.path.startswith("/static"):
-        return None
-    if ADMIN_PASSWORD:
-        auth = request.headers.get("Authorization", "")
-        ok = False
-        if auth.startswith("Basic "):
-            try:
-                _, pw = base64.b64decode(auth[6:]).decode().split(":", 1)
-                ok = hmac.compare_digest(pw, ADMIN_PASSWORD)
-            except Exception:
-                ok = False
-        if not ok:
-            return Response("Auth required", 401, {"WWW-Authenticate": 'Basic realm="sixy"'})
     if request.method == "POST":
         origin = request.headers.get("Origin") or request.headers.get("Referer")
-        if origin and urlparse(origin).netloc != request.host:
+        if origin and origin != "null" and urlparse(origin).netloc not in _allowed_hosts():
+            log.warning("Rejected cross-origin POST to %s from %s (host %s)", request.path, origin, request.host)
             return Response("Cross-origin POST rejected", 403)
-    return None
+    if not ADMIN_PASSWORD or request.path in PUBLIC_PATHS or request.path.startswith("/static"):
+        return None
+    if session.get("authed") or _basic_auth_ok():
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify(error="login required"), 401
+    return redirect(url_for("login", next=request.full_path.rstrip("?")))
+
+
+@app.context_processor
+def auth_ctx():
+    return {"auth_enabled": bool(ADMIN_PASSWORD)}
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    nxt = request.values.get("next") or "/"
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/"
+    if not ADMIN_PASSWORD or session.get("authed"):
+        return redirect(nxt)
+    if request.method == "POST":
+        if _password_ok(request.form.get("password", "")):
+            session.clear()
+            session["authed"] = True
+            session.permanent = True
+            return redirect(nxt)
+        log.warning("Failed login from %s", request.headers.get("X-Forwarded-For", request.remote_addr))
+        flash("Wrong password.", "err")
+    return render_template("login.html", next=nxt, **ctx())
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.get("/livez")
+def livez():
+    return "ok"
 
 
 @app.template_filter("ago")
@@ -195,7 +270,29 @@ def healthz():
     return jsonify(status="stale" if stale else s["status"], ip=s["ip"], unexpected=s["unexpected"]), code
 
 
+def _persistent_secret():
+    """Keep logins valid across container restarts."""
+    if os.environ.get("SECRET_KEY"):
+        return os.environ["SECRET_KEY"]
+    path = os.path.join(store.DATA_DIR, "secret.key")
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        key = os.urandom(32)
+        os.makedirs(store.DATA_DIR, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(key)
+        return key
+
+
 def create_app():
     store.init_db()
+    app.secret_key = _persistent_secret()
+    if ADMIN_PASSWORD:
+        log.info("Login enabled (password is %d characters).", len(ADMIN_PASSWORD))
+    else:
+        log.warning("ADMIN_PASSWORD not set - the dashboard is open to anyone who can reach it.")
     scanner.start_scheduler()
     return app
