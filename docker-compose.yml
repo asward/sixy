@@ -1,7 +1,7 @@
 services:
   sixy:
-    image: ghcr.io/asward/sixy:latest   # published by CI on every push to main
-    build: .                            # `docker compose up -d --build` to build locally instead
+    image: ghcr.io/asward/sixy:latest # published by CI on every push to main
+    build: . # `docker compose up -d --build` to build locally instead
     container_name: sixy
     restart: unless-stopped
     ports:
@@ -11,7 +11,7 @@ services:
       - TZ=America/Los_Angeles
       # - SCAN_BACKEND=demo           # preview the UI with fake results, no Google account
     volumes:
-      - sixy-data:/data   # named volume (bind mount needs: chown 1000 ./data)
+      - sixy-data:/data # named volume (bind mount needs: chown 1000 ./data)
 
 volumes:
   sixy-data:

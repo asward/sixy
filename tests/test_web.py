@@ -55,12 +55,52 @@ def test_cross_origin_post_rejected(client):
     assert r.status_code == 403
 
 
-def test_basic_auth(client, monkeypatch):
+def test_login_flow(client, monkeypatch):
     monkeypatch.setattr(main, "ADMIN_PASSWORD", "s3cret")
-    assert client.get("/").status_code == 401
-    good = base64.b64encode(b"admin:s3cret").decode()
-    assert client.get("/", headers={"Authorization": f"Basic {good}"}).status_code == 200
-    assert client.get("/healthz").status_code in (200, 503)  # unauthenticated by design
+    r = client.get("/settings")
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+    assert client.get("/api/status").status_code == 401
+    assert client.get("/healthz").status_code in (200, 503)  # open by design
+    assert client.get("/livez").status_code == 200
+
+    r = client.post("/login", data={"password": "nope", "next": "/settings"})
+    assert r.status_code == 200 and "Wrong password" in r.get_data(as_text=True)
+    assert client.get("/").status_code == 302
+
+    r = client.post("/login", data={"password": "s3cret", "next": "/settings"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/settings")
+    assert client.get("/").status_code == 200
+    assert "Log out" in client.get("/").get_data(as_text=True)
+
+    client.get("/logout")
+    assert client.get("/").status_code == 302
+
+
+def test_login_rejects_open_redirect(client, monkeypatch):
+    monkeypatch.setattr(main, "ADMIN_PASSWORD", "s3cret")
+    r = client.post("/login", data={"password": "s3cret", "next": "//evil.example/x"})
+    assert r.headers["Location"] in ("/", "http://localhost/")
+
+
+def test_basic_auth_still_works_for_scripts(client, monkeypatch):
+    monkeypatch.setattr(main, "ADMIN_PASSWORD", "s3cret")
+    good = base64.b64encode(b"anyone:s3cret").decode()
+    assert client.get("/api/status", headers={"Authorization": f"Basic {good}"}).status_code == 200
+    bad = base64.b64encode(b"anyone:wrong").decode()
+    assert client.get("/api/status", headers={"Authorization": f"Basic {bad}"}).status_code == 401
+
+
+@pytest.mark.parametrize("raw,expect", [('"pw"', "pw"), ("'pw'", "pw"), ("  pw ", "pw"), ('"', '"'), ("", "")])
+def test_clean_password(raw, expect):
+    assert main.clean_password(raw) == expect
+
+
+def test_reverse_proxy_post_allowed(client):
+    r = client.post("/settings", data={"allowed_ports": "443"},
+                    headers={"Origin": "https://sixy.example.com", "X-Forwarded-Host": "sixy.example.com"})
+    assert r.status_code == 302
+    r = client.post("/settings", data={"allowed_ports": "443"}, headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
 
 
 def test_key_upload_rejects_garbage(client):

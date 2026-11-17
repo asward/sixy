@@ -28,7 +28,7 @@ The prebuilt image (amd64 and arm64) is published to `ghcr.io/asward/sixy`:
 
 ```bash
 docker compose up -d          # pulls ghcr.io/asward/sixy:latest
-# open http://<host>:8080   (basic auth: any username, password = ADMIN_PASSWORD)
+# open http://<host>:8080 and sign in with ADMIN_PASSWORD
 ```
 
 Or run it without compose:
@@ -39,6 +39,14 @@ docker run -d --name sixy -p 8080:8080 -e ADMIN_PASSWORD=change-me \
 ```
 
 To preview the dashboard without a Google account, set `SCAN_BACKEND=demo`.
+
+**Login**
+- **Signing in:** the dashboard has a sign-in page that asks only for `ADMIN_PASSWORD`. Sessions last 30 days and survive container restarts.
+- **Scripts and curl:** HTTP basic auth still works, e.g. `curl -u :PASSWORD http://host:8080/api/status`.
+- **No password:** if `ADMIN_PASSWORD` is unset, the UI is open to anyone who can reach it.
+- **`$` in Compose:** Compose treats `$` as the start of a variable, so write `$$` for a literal `$` in the password.
+- **Checking the password:** the container log prints the password's length at startup, so you can confirm what it actually received.
+- **Monitoring:** `/healthz` (scan status) and `/livez` (process alive) work without logging in.
 
 ## Development
 

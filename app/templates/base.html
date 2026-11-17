@@ -37,7 +37,7 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
 </head>
 <body>
 <header><b>Sixy</b>{% if backend=='demo' %}<span class="pill r-high">DEMO MODE</span>{% endif %}
-<nav><a href="{{ url_for('index') }}">Dashboard</a><a href="{{ url_for('settings') }}">Settings</a></nav></header>
+{% if not auth_enabled or session.authed %}<nav><a href="{{ url_for('index') }}">Dashboard</a><a href="{{ url_for('settings') }}">Settings</a>{% if auth_enabled %}<a href="{{ url_for('logout') }}">Log out</a>{% endif %}</nav>{% endif %}</header>
 <main>
 {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
 {% block body %}{% endblock %}
