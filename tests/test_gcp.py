@@ -16,7 +16,7 @@ def key_file(tmp_path):
     p = tmp_path / "key.json"
     p.write_text(json.dumps({
         "type": "service_account", "project_id": "proj-x", "private_key_id": "1", "private_key": pem,
-        "client_email": "wanwatch@proj-x.iam.gserviceaccount.com", "client_id": "1",
+        "client_email": "sixy-scanner@proj-x.iam.gserviceaccount.com", "client_id": "1",
         "token_uri": "https://oauth2.googleapis.com/token",
     }))
     return str(p)
@@ -41,15 +41,15 @@ class FakeGoogle:
         self.calls.append((method, url, kw.get("json"), kw.get("params")))
         if "batchEnable" in url:
             return Resp(403, {"error": {"message": "denied"}})
-        if method == "GET" and url.endswith("/jobs/wanwatch-scan"):
+        if method == "GET" and url.endswith("/jobs/sixy-scan"):
             return Resp(200, {}) if self.job_exists else Resp(404, {})
-        if method in ("POST", "PATCH") and (url.endswith("/jobs") or url.endswith("/jobs/wanwatch-scan")):
+        if method in ("POST", "PATCH") and (url.endswith("/jobs") or url.endswith("/jobs/sixy-scan")):
             return Resp(200, {"name": "projects/proj-x/locations/us-west1/operations/op1", "done": False})
         if "operations/op1" in url:
             return Resp(200, {"name": "op1", "done": True})
         if url.endswith(":run"):
             return Resp(200, {"name": "projects/proj-x/locations/us-west1/operations/op2", "metadata": {
-                "name": "projects/proj-x/locations/us-west1/jobs/wanwatch-scan/executions/wanwatch-scan-abc12"}})
+                "name": "projects/proj-x/locations/us-west1/jobs/sixy-scan/executions/sixy-scan-abc12"}})
         if "/executions/" in url:
             self.exec_polls += 1
             if self.exec_polls < 2:
@@ -71,7 +71,7 @@ def scanner_with(key_file, monkeypatch):
     monkeypatch.setattr(gcp.time, "sleep", lambda s: None)
 
     def make(fake):
-        sc = gcp.CloudRunScanner(key_file, "us-west1", "wanwatch-scan")
+        sc = gcp.CloudRunScanner(key_file, "us-west1", "sixy-scan")
         sc.s.request = lambda method, url, **kw: fake(method, url, **kw)
         return sc
     return make
@@ -83,9 +83,9 @@ def test_deploy_creates_job_when_missing(scanner_with):
     assert "no permission" in sc.enable_apis()
     assert sc.ensure_job("docker.io/instrumentisto/nmap:latest").startswith("Created")
     create = next(c for c in fake.calls if c[0] == "POST" and c[1].endswith("/jobs"))
-    assert create[3] == {"jobId": "wanwatch-scan"}
+    assert create[3] == {"jobId": "sixy-scan"}
     tmpl = create[2]["template"]["template"]
-    assert tmpl["serviceAccount"] == "wanwatch@proj-x.iam.gserviceaccount.com"
+    assert tmpl["serviceAccount"] == "sixy-scanner@proj-x.iam.gserviceaccount.com"
     assert tmpl["containers"][0]["image"] == "docker.io/instrumentisto/nmap:latest"
 
 
@@ -98,12 +98,12 @@ def test_deploy_updates_existing_job(scanner_with):
 def test_run_scan_passes_args_and_reads_logs(scanner_with):
     fake = FakeGoogle()
     exec_name, lines = scanner_with(fake).run_scan(["-Pn", "1.2.3.4"], 900)
-    assert exec_name == "wanwatch-scan-abc12"
+    assert exec_name == "sixy-scan-abc12"
     assert lines[-1].startswith("# Nmap done")
     run = next(c for c in fake.calls if c[1].endswith(":run"))
     assert run[2]["overrides"]["containerOverrides"][0]["args"] == ["-Pn", "1.2.3.4"]
     log_req = next(c for c in fake.calls if "entries:list" in c[1])
-    assert 'execution_name"="wanwatch-scan-abc12"' in log_req[2]["filter"]
+    assert 'execution_name"="sixy-scan-abc12"' in log_req[2]["filter"]
 
 
 def test_failed_execution_raises(scanner_with, monkeypatch):

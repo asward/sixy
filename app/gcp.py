@@ -64,7 +64,7 @@ class CloudRunScanner:
 
     def _job_body(self, image):
         return {
-            "labels": {"app": "wanwatch"},
+            "labels": {"app": "sixy"},
             "template": {
                 "taskCount": 1,
                 "parallelism": 1,

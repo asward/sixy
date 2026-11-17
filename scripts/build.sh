@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build the container image locally.
-#   scripts/build.sh                 -> wanwatch:local
+#   scripts/build.sh                 -> sixy:local
 #   IMAGE=ghcr.io/asward/sixy:dev scripts/build.sh
 #   PLATFORMS=linux/amd64,linux/arm64 PUSH=1 IMAGE=ghcr.io/asward/sixy:dev scripts/build.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IMAGE="${IMAGE:-wanwatch:local}"
+IMAGE="${IMAGE:-sixy:local}"
 REVISION="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 
 if [[ -n "${PLATFORMS:-}" ]]; then

@@ -28,7 +28,7 @@ def guard():
             except Exception:
                 ok = False
         if not ok:
-            return Response("Auth required", 401, {"WWW-Authenticate": 'Basic realm="wanwatch"'})
+            return Response("Auth required", 401, {"WWW-Authenticate": 'Basic realm="sixy"'})
     if request.method == "POST":
         origin = request.headers.get("Origin") or request.headers.get("Referer")
         if origin and urlparse(origin).netloc != request.host:
