@@ -39,7 +39,7 @@ def test_dashboard_shows_results(client):
 
 def test_settings_save_and_validation(client):
     r = client.post("/settings", data={"allowed_ports": "80, 443", "profile": "top100", "interval_minutes": "5",
-                                       "region": "us-west1", "job_name": "wanwatch-scan",
+                                       "region": "us-west1", "job_name": "sixy-scan",
                                        "image": "docker.io/instrumentisto/nmap:latest"})
     assert r.status_code == 302
     cfg = store.load_config()

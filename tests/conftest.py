@@ -5,7 +5,7 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-os.environ.setdefault("DATA_DIR", "/tmp/wanwatch-test-default")
+os.environ.setdefault("DATA_DIR", "/tmp/sixy-test-default")
 
 from app import scanner, store  # noqa: E402
 
@@ -16,7 +16,7 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(store, "CONFIG_PATH", str(tmp_path / "config.json"))
     monkeypatch.setattr(store, "KEY_PATH", str(tmp_path / "gcp-key.json"))
-    monkeypatch.setattr(store, "DB_PATH", str(tmp_path / "wanwatch.db"))
+    monkeypatch.setattr(store, "DB_PATH", str(tmp_path / "sixy.db"))
     monkeypatch.setattr(scanner, "BACKEND", "demo")
     monkeypatch.setattr(scanner.time, "sleep", lambda s: None)
     monkeypatch.setattr(scanner, "internetdb", lambda ip: {"ports": [443], "vulns": [], "cpes": [], "hostnames": [], "tags": []})

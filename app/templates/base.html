@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WAN Watch</title>
+<title>Sixy</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--fg:#1d2330;--mut:#6b7385;--line:#e3e6ec;--ok:#1f8a4c;--okbg:#e6f5ec;--bad:#c0362c;--badbg:#fbe9e7;--warn:#a86400;--warnbg:#fff4df;--acc:#2b59c3}
 @media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b1f27;--fg:#e6e8ee;--mut:#9099ab;--line:#2b313d;--okbg:#15301f;--badbg:#3a1b18;--warnbg:#36290f;--acc:#7aa2ff}}
@@ -36,7 +36,7 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
 </style>
 </head>
 <body>
-<header><b>WAN Watch</b>{% if backend=='demo' %}<span class="pill r-high">DEMO MODE</span>{% endif %}
+<header><b>Sixy</b>{% if backend=='demo' %}<span class="pill r-high">DEMO MODE</span>{% endif %}
 <nav><a href="{{ url_for('index') }}">Dashboard</a><a href="{{ url_for('settings') }}">Settings</a></nav></header>
 <main>
 {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}

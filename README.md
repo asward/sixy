@@ -1,4 +1,4 @@
-# WAN Watch
+# Sixy
 
 A self-hosted dashboard that checks what your home network exposes to the internet.
 
@@ -13,7 +13,7 @@ A self-hosted dashboard that checks what your home network exposes to the intern
 ## How it works
 
 ```
-[wanwatch container @ home] --(service-account key)--> Cloud Run Admin API: run job with args "nmap ... <your WAN IP>"
+[sixy container @ home] --(service-account key)--> Cloud Run Admin API: run job with args "nmap ... <your WAN IP>"
           ^                                              |
           |                                     Cloud Run Job (public image instrumentisto/nmap)
           |                                              | scans your IP from Google's network
@@ -34,8 +34,8 @@ docker compose up -d          # pulls ghcr.io/asward/sixy:latest
 Or run it without compose:
 
 ```bash
-docker run -d --name wanwatch -p 8080:8080 -e ADMIN_PASSWORD=change-me \
-  -v wanwatch-data:/data ghcr.io/asward/sixy:latest
+docker run -d --name sixy -p 8080:8080 -e ADMIN_PASSWORD=change-me \
+  -v sixy-data:/data ghcr.io/asward/sixy:latest
 ```
 
 To preview the dashboard without a Google account, set `SCAN_BACKEND=demo`.
@@ -45,7 +45,7 @@ To preview the dashboard without a Google account, set `SCAN_BACKEND=demo`.
 | Script | What it does |
 |---|---|
 | `scripts/test.sh` | Creates `.venv`, installs dev dependencies, runs pytest (extra args are passed through) |
-| `scripts/build.sh` | `docker build` → `wanwatch:local`. Set `IMAGE=` to change the tag; set `PLATFORMS=linux/amd64,linux/arm64 PUSH=1` for a multi-arch buildx push |
+| `scripts/build.sh` | `docker build` → `sixy:local`. Set `IMAGE=` to change the tag; set `PLATFORMS=linux/amd64,linux/arm64 PUSH=1` for a multi-arch buildx push |
 | `scripts/run-demo.sh` | Builds the image and runs it in demo mode on :8080 |
 
 **CI (GitHub Actions)**
@@ -61,7 +61,7 @@ GHCR packages start out private. To pull without logging in, make the package pu
 The Settings page walks you through this, including a Cloud Shell snippet to paste. In summary:
 
 1. Create a project and link billing. Cloud Run requires billing, but this usage stays within the free tier. Adding a $1 budget alert is recommended.
-2. Run the snippet. It enables the Cloud Run and Logging APIs, creates a `wanwatch` service account, grants it the roles below, and downloads a JSON key.
+2. Run the snippet. It enables the Cloud Run and Logging APIs, creates a `sixy-scanner` service account, grants it the roles below, and downloads a JSON key.
    - `roles/run.developer`: create, update and run the job
    - `roles/logging.viewer`: read the nmap output
    - `roles/logging.logWriter`

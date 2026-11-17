@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 KEY_PATH = os.path.join(DATA_DIR, "gcp-key.json")
-DB_PATH = os.path.join(DATA_DIR, "wanwatch.db")
+DB_PATH = os.path.join(DATA_DIR, "sixy.db")
 
 DEFAULTS = {
     "region": "us-west1",
-    "job_name": "wanwatch-scan",
+    "job_name": "sixy-scan",
     "image": "docker.io/instrumentisto/nmap:latest",
     "profile": "top1000",          # top100 | top1000 | all
     "version_detect": True,        # nmap -sV

@@ -14,7 +14,7 @@ data/
 
 # Secrets - never commit Google service-account keys
 gcp-key.json
-wanwatch-key.json
+sixy-key.json
 *-key.json
 .env
 

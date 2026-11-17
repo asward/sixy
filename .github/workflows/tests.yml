@@ -34,14 +34,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build image
-        run: docker build -t wanwatch:ci .
+        run: docker build -t sixy:ci .
       - name: Run in demo mode and trigger a scan
         run: |
-          docker run -d --name ww -p 8080:8080 -e SCAN_BACKEND=demo wanwatch:ci
+          docker run -d --name sixy -p 8080:8080 -e SCAN_BACKEND=demo sixy:ci
           for i in $(seq 1 30); do curl -fsS localhost:8080/api/status && break; sleep 1; done
           curl -fsS -o /dev/null localhost:8080/settings
           curl -fsS -o /dev/null -X POST localhost:8080/settings \
-            --data "allowed_ports=443&profile=top100&interval_minutes=60&region=us-west1&job_name=wanwatch-scan&image=docker.io/instrumentisto/nmap:latest&target_override=198.51.100.7"
+            --data "allowed_ports=443&profile=top100&interval_minutes=60&region=us-west1&job_name=sixy-scan&image=docker.io/instrumentisto/nmap:latest&target_override=198.51.100.7"
           curl -fsS -o /dev/null -X POST localhost:8080/scan
           for i in $(seq 1 30); do
             STATUS=$(curl -s localhost:8080/api/status | python3 -c "import json,sys; l=json.load(sys.stdin)['latest']; print(l['status'] if l else '')")
@@ -51,4 +51,4 @@ jobs:
           test "$STATUS" = "alert"
       - name: Container logs
         if: always()
-        run: docker logs ww
+        run: docker logs sixy

@@ -1,8 +1,8 @@
 services:
-  wanwatch:
-    image: ghcr.io/asward/sixy:latest # published by CI on every push to main
-    build: . # `docker compose up -d --build` to build locally instead
-    container_name: wanwatch
+  sixy:
+    image: ghcr.io/asward/sixy:latest   # published by CI on every push to main
+    build: .                            # `docker compose up -d --build` to build locally instead
+    container_name: sixy
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -11,7 +11,7 @@ services:
       - TZ=America/Los_Angeles
       # - SCAN_BACKEND=demo           # preview the UI with fake results, no Google account
     volumes:
-      - wanwatch-data:/data # named volume (bind mount needs: chown 1000 ./data)
+      - sixy-data:/data   # named volume (bind mount needs: chown 1000 ./data)
 
 volumes:
-  wanwatch-data:
+  sixy-data:
