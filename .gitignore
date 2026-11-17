@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Runtime data (SQLite history, config, uploaded key)
+data/
+*.db
+
+# Secrets - never commit Google service-account keys
+gcp-key.json
+wanwatch-key.json
+*-key.json
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

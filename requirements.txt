@@ -1,0 +1,5 @@
+flask==3.1.*
+waitress==3.0.*
+google-auth==2.*
+requests==2.*
+apprise==1.*

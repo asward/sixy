@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not key and backend != 'demo' %}
+<div class="flash warn">Not configured yet. Go to <a href="{{ url_for('settings') }}">Settings</a> to connect Google Cloud.</div>
+{% endif %}
+
+{% set s = latest %}
+<div class="card hero {{ s.status if s else 'none' }}">
+  <div>
+    {% if not s %}<div class="big">No scans yet</div>
+    {% elif s.status == 'ok' %}<div class="big" style="color:var(--ok)">Clean</div><div class="mut">Only allowed ports open</div>
+    {% else %}<div class="big" style="color:var(--bad)">{{ s.unexpected|length }} unexpected port{{ '' if s.unexpected|length==1 else 's' }}</div>
+      <div class="mono">{{ s.unexpected|join(', ') }}</div>{% endif %}
+  </div>
+  <div class="grid">
+    <div class="stat"><div class="k">WAN IP</div><div class="v mono">{{ s.ip if s else '-' }}</div></div>
+    <div class="stat"><div class="k">Last scan</div><div class="v">{{ (s.finished|ago) if s else '-' }}</div></div>
+    <div class="stat"><div class="k">Next scan</div><div class="v">{% if state.running %}running…{% elif state.next_run %}{{ state.next_run|ts }}{% else %}<span class="mut">schedule off</span>{% endif %}</div></div>
+    <div class="stat"><div class="k">Profile</div><div class="v">{{ cfg.profile }}{{ ' + -sV' if cfg.version_detect }}</div></div>
+  </div>
+  <form method="post" action="{{ url_for('scan_now') }}"><button {{ 'disabled' if state.running }}>{{ 'Scanning…' if state.running else 'Scan now' }}</button></form>
+</div>
+
+{% if state.last_error %}<div class="flash err"><b>Last scan failed:</b> <span class="mono">{{ state.last_error }}</span></div>{% endif %}
+
+{% if s %}
+<div class="card">
+  <h2>Open ports seen from the internet</h2>
+  {% if not s.ports %}<p class="mut">No open TCP ports found in the scanned range.</p>{% else %}
+  <table>
+    <tr><th>Port</th><th>Likely service</th><th>Fingerprint (nmap)</th><th>Risk</th><th class="hide-sm">Shodan</th></tr>
+    {% for p in s.ports %}
+    <tr class="{{ 'dim' if p.allowed }}">
+      <td class="mono"><b>{{ p.port }}</b>/{{ p.proto }}{% if p.allowed %}<br><span class="pill r-ok">allowed</span>{% endif %}</td>
+      <td><b>{{ p.likely }}</b><div class="small mut">{{ p.note }}</div></td>
+      <td class="small"><span class="mono">{{ p.service or '?' }}</span>{% if p.version %}<br>{{ p.version }}{% endif %}</td>
+      <td><span class="pill r-{{ p.risk }}">{{ p.risk }}</span></td>
+      <td class="hide-sm small">{{ 'indexed' if p.in_shodan else '-' }}</td>
+    </tr>{% endfor %}
+  </table>{% endif %}
+  <p class="small mut">TCP connect scan from Google Cloud ({{ s.profile }}). UDP services (e.g. WireGuard) are not detected. <a href="{{ url_for('scan_detail', scan_id=s.id) }}">Raw output</a></p>
+</div>
+
+<div class="card">
+  <h2>Shodan InternetDB view</h2>
+  {% set sh = s.shodan %}
+  {% if sh.error %}<p class="mut">{{ sh.error }}</p>{% else %}
+  <div class="grid">
+    <div class="stat"><div class="k">Ports indexed</div><div class="v mono">{{ (sh.ports or [])|join(', ') or 'none' }}</div></div>
+    <div class="stat"><div class="k">Hostnames</div><div class="v small">{{ (sh.hostnames or [])|join(', ') or '-' }}</div></div>
+    <div class="stat"><div class="k">Tags</div><div class="v small">{{ (sh.tags or [])|join(', ') or '-' }}</div></div>
+  </div>
+  {% if sh.vulns %}<p><b style="color:var(--bad)">CVEs Shodan associates with this IP:</b><br><span class="mono small">{{ sh.vulns|join(', ') }}</span></p>{% endif %}
+  {% set only_shodan = (sh.ports or [])|reject('in', s.ports|map(attribute='port')|list)|list %}
+  {% if only_shodan %}<p class="small"><b>Seen by Shodan but not by this scan:</b> <span class="mono">{{ only_shodan|join(', ') }}</span> — closed since Shodan's last crawl, UDP, or outside the scanned port range.</p>{% endif %}
+  {% if sh.note %}<p class="small mut">{{ sh.note }}</p>{% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="row">
+<div class="card">
+  <h2>History</h2>
+  <table class="small">
+    <tr><th>When</th><th>IP</th><th>Status</th><th>Unexpected</th></tr>
+    {% for h in scans %}
+    <tr><td><a href="{{ url_for('scan_detail', scan_id=h.id) }}">{{ h.started|ago }}</a></td><td class="mono">{{ h.ip }}</td>
+      <td><span class="pill r-{{ h.status }}">{{ h.status }}</span></td><td class="mono">{{ h.unexpected|join(', ') or '-' }}</td></tr>
+    {% else %}<tr><td colspan="4" class="mut">None yet</td></tr>{% endfor %}
+  </table>
+</div>
+<div class="card">
+  <h2>Events</h2>
+  <table class="small">
+    {% for e in events %}<tr><td class="mut" style="white-space:nowrap">{{ e.ts|ago }}</td><td><span class="pill r-{{ 'error' if e.kind=='error' else ('high' if e.kind=='change' else 'unknown') }}">{{ e.kind }}</span></td><td>{{ e.message }}</td></tr>
+    {% else %}<tr><td class="mut">Nothing yet</td></tr>{% endfor %}
+  </table>
+</div>
+</div>
+{% if state.running %}<script>setTimeout(()=>location.reload(),10000)</script>{% endif %}
+{% endblock %}

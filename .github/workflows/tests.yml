@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches-ignore: [main]   # main is tested by docker-publish.yml before pushing the image
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -v
+
+  docker-smoke:
+    name: Container smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build -t wanwatch:ci .
+      - name: Run in demo mode and trigger a scan
+        run: |
+          docker run -d --name ww -p 8080:8080 -e SCAN_BACKEND=demo wanwatch:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/api/status && break; sleep 1; done
+          curl -fsS -o /dev/null localhost:8080/settings
+          curl -fsS -o /dev/null -X POST localhost:8080/settings \
+            --data "allowed_ports=443&profile=top100&interval_minutes=60&region=us-west1&job_name=wanwatch-scan&image=docker.io/instrumentisto/nmap:latest&target_override=198.51.100.7"
+          curl -fsS -o /dev/null -X POST localhost:8080/scan
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s localhost:8080/api/status | python3 -c "import json,sys; l=json.load(sys.stdin)['latest']; print(l['status'] if l else '')")
+            [ -n "$STATUS" ] && break; sleep 1
+          done
+          echo "scan status: $STATUS"
+          test "$STATUS" = "alert"
+      - name: Container logs
+        if: always()
+        run: docker logs ww

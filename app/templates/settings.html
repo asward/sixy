@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>1 · Google Cloud setup (one time, ~3 minutes)</h2>
+  <p class="small">In the <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Cloud Console</a>, create a project and <a href="https://console.cloud.google.com/billing/linkedaccount" target="_blank" rel="noopener">link billing</a> (required for Cloud Run; usage stays inside the free tier — add a $1 budget alert to be safe). Then open <a href="https://shell.cloud.google.com/" target="_blank" rel="noopener">Cloud Shell</a> and paste:</p>
+<pre>PROJECT=your-project-id
+gcloud config set project $PROJECT
+gcloud services enable run.googleapis.com logging.googleapis.com
+gcloud iam service-accounts create wanwatch --display-name="WAN Watch"
+SA=wanwatch@$PROJECT.iam.gserviceaccount.com
+for R in roles/run.developer roles/logging.viewer roles/logging.logWriter; do
+  gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:$SA --role=$R --condition=None -q >/dev/null
+done
+gcloud iam service-accounts add-iam-policy-binding $SA --member=serviceAccount:$SA --role=roles/iam.serviceAccountUser -q >/dev/null
+gcloud iam service-accounts keys create wanwatch-key.json --iam-account=$SA
+cloudshell download wanwatch-key.json</pre>
+  <p class="help">The key can only manage Cloud Run jobs and read logs in that one project. Revoke it anytime under IAM → Service accounts → wanwatch → Keys.</p>
+</div>
+
+<div class="card">
+  <h2>2 · Upload key &amp; deploy scanner</h2>
+  {% if key %}<p>Key loaded: <span class="mono">{{ key.client_email }}</span> (project <b>{{ key.project_id }}</b>)</p>{% endif %}
+  <form method="post" action="{{ url_for('upload_key') }}" enctype="multipart/form-data">
+    <label>Service-account JSON key</label>
+    <input type="file" name="keyfile" accept=".json,application/json">
+    <div class="help">Stored at /data/gcp-key.json (mode 600). Never leaves this container except to authenticate with Google.</div>
+    <p><button class="sec">{{ 'Replace key' if key else 'Save key' }}</button></p>
+  </form>
+  <form method="post" action="{{ url_for('deploy') }}">
+    <p><button {{ '' if key or backend=='demo' else 'disabled' }}>{{ 'Re-deploy' if cfg.job_deployed else 'Deploy' }} Cloud Run job</button>
+    {% if cfg.job_deployed %}<span class="pill r-ok">deployed</span>{% else %}<span class="pill r-unknown">not deployed</span>{% endif %}</p>
+    <div class="help">Creates job <span class="mono">{{ cfg.job_name }}</span> in <span class="mono">{{ cfg.region }}</span> running the public <span class="mono">{{ cfg.image }}</span> image. Nothing is exposed publicly; scans only run when this container triggers them.</div>
+  </form>
+</div>
+
+<form method="post" action="{{ url_for('save_settings') }}">
+<div class="card">
+  <h2>3 · Scan settings</h2>
+  <div class="row">
+    <div>
+      <label>Allowed ports</label>
+      <input name="allowed_ports" value="{{ cfg.allowed_ports|join(', ') }}" placeholder="e.g. 443, 32400">
+      <div class="help">Ports you intentionally forward. Anything else open = alert.</div>
+    </div>
+    <div>
+      <label>Port range</label>
+      <select name="profile">
+        <option value="top100" {{ 'selected' if cfg.profile=='top100' }}>Top 100 ports (~20 s)</option>
+        <option value="top1000" {{ 'selected' if cfg.profile=='top1000' }}>Top 1000 ports (~1 min)</option>
+        <option value="all" {{ 'selected' if cfg.profile=='all' }}>All 65,535 ports (5-20 min — use a daily interval)</option>
+      </select>
+    </div>
+    <div>
+      <label>Interval (minutes)</label>
+      <input type="number" name="interval_minutes" min="15" value="{{ cfg.interval_minutes }}">
+      <div class="help">Free tier fits hourly top-1000, or daily full scans.</div>
+    </div>
+    <div>
+      <label>Target override</label>
+      <input name="target_override" value="{{ cfg.target_override }}" placeholder="blank = auto-detect WAN IP">
+      <div class="help">Optional DDNS hostname or IP. Leave blank if this container runs at home.</div>
+    </div>
+  </div>
+  <label class="chk"><input type="checkbox" name="version_detect" {{ 'checked' if cfg.version_detect }}> Identify service versions (nmap -sV, adds ~30 s)</label>
+  <label class="chk"><input type="checkbox" name="schedule_enabled" {{ 'checked' if cfg.schedule_enabled }}> Run on schedule</label>
+</div>
+
+<div class="card">
+  <h2>Notifications</h2>
+  <label>Apprise URLs (one per line)</label>
+  <textarea name="notify_urls" rows="3" placeholder="ntfys://ntfy.sh/my-wan-topic&#10;tgram://bottoken/chatid&#10;mailtos://user:pass@gmail.com">{{ cfg.notify_urls }}</textarea>
+  <div class="help">Any <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener">Apprise</a> target: ntfy, Telegram, Discord, Slack, Pushover, email… Sent when ports open/close, IP changes, new CVEs appear, or a scan fails.</div>
+  <label class="chk"><input type="checkbox" name="notify_each_alert" {{ 'checked' if cfg.notify_each_alert }}> Also re-notify on every scan while unexpected ports stay open</label>
+</div>
+
+<div class="card">
+  <h2>Advanced</h2>
+  <div class="row">
+    <div><label>Region</label><input name="region" value="{{ cfg.region }}"><div class="help">Free tier applies in Tier-1 regions (us-west1, us-central1, us-east1…).</div></div>
+    <div><label>Job name</label><input name="job_name" value="{{ cfg.job_name }}"></div>
+  </div>
+  <label>Scanner image</label><input name="image" value="{{ cfg.image }}">
+</div>
+<p><button>Save settings</button></p>
+</form>
+{% endblock %}

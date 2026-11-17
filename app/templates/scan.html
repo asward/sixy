@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Scan #{{ s.id }}</h2>
+  <p><span class="pill r-{{ s.status }}">{{ s.status }}</span> &nbsp; <span class="mono">{{ s.ip }}</span> &nbsp; started {{ s.started }} · finished {{ s.finished or '-' }} · profile {{ s.profile }} · execution <span class="mono">{{ s.execution or '-' }}</span></p>
+  {% if s.error %}<pre>{{ s.error }}</pre>{% endif %}
+  {% if s.ports %}<p>Open: <span class="mono">{{ s.ports|map(attribute='port')|join(', ') }}</span>{% if s.unexpected %} · Unexpected: <span class="mono" style="color:var(--bad)">{{ s.unexpected|join(', ') }}</span>{% endif %}</p>{% endif %}
+  <h2>Raw nmap output</h2>
+  <pre>{{ s.raw or '(none)' }}</pre>
+  <h2>InternetDB response</h2>
+  <pre>{{ s.shodan|tojson(indent=2) }}</pre>
+  <a href="{{ url_for('index') }}">← Back</a>
+</div>
+{% endblock %}
