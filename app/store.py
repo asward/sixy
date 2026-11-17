@@ -10,7 +10,12 @@ CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 KEY_PATH = os.path.join(DATA_DIR, "gcp-key.json")
 DB_PATH = os.path.join(DATA_DIR, "sixy.db")
 
+DEFAULT_UDP_PORTS = [53, 69, 123, 137, 161, 500, 1194, 1701, 1900, 3478, 4500, 5060, 5353, 11211, 51820]
+
 DEFAULTS = {
+    "engine": "cloudrun",          # cloudrun | local (nmap in this container, e.g. via gluetun)
+    "udp_ports": DEFAULT_UDP_PORTS,  # local engine only (needs raw sockets)
+    "ip_lookup_url": "",           # optional URL returning the home WAN IP as plain text
     "region": "us-west1",
     "job_name": "sixy-scan",
     "image": "docker.io/instrumentisto/nmap:latest",
@@ -93,6 +98,9 @@ def init_db():
             );
             """
         )
+        cols = {r[1] for r in c.execute("PRAGMA table_info(scans)")}
+        if "engine" not in cols:
+            c.execute("ALTER TABLE scans ADD COLUMN engine TEXT DEFAULT ''")
         # A crash mid-scan leaves rows stuck in 'running'.
         c.execute("UPDATE scans SET status='error', error='interrupted (container restart)' WHERE status='running'")
 

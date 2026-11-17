@@ -67,5 +67,18 @@ def test_target_override_rejects_injection(bad):
         resolve_target({"target_override": bad})
 
 
-def test_target_override_accepts_hostname():
-    assert resolve_target({"target_override": "home.example.duckdns.org"}) == "home.example.duckdns.org"
+def test_target_override_resolves_hostname(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, fam: [(fam, 1, 6, "", ("203.0.113.9", 0))])
+    assert resolve_target({"target_override": "home.example.duckdns.org"}) == "203.0.113.9"
+
+
+def test_target_override_ip_passthrough():
+    assert resolve_target({"target_override": "198.51.100.7"}) == "198.51.100.7"
+
+
+def test_parse_ignores_udp_open_filtered():
+    _, ports = parse_greppable([
+        "Host: 1.2.3.4 ()\tPorts: 53/open/udp//domain//dnsmasq 2.90/, 51820/open|filtered/udp//unknown///, "
+        "123/open|filtered/udp//ntp///\tIgnored State: open|filtered (12)"])
+    assert [(p["port"], p["proto"]) for p in ports] == [(53, "udp")]

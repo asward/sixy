@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body %}
-{% if not key and backend != 'demo' %}
+{% if engine == 'cloudrun' and not key %}
 <div class="flash warn">Not configured yet. Go to <a href="{{ url_for('settings') }}">Settings</a> to connect Google Cloud.</div>
 {% endif %}
 
@@ -16,7 +16,7 @@
     <div class="stat"><div class="k">WAN IP</div><div class="v mono">{{ s.ip if s else '-' }}</div></div>
     <div class="stat"><div class="k">Last scan</div><div class="v">{{ (s.finished|ago) if s else '-' }}</div></div>
     <div class="stat"><div class="k">Next scan</div><div class="v">{% if state.running %}running…{% elif state.next_run %}{{ state.next_run|ts }}{% else %}<span class="mut">schedule off</span>{% endif %}</div></div>
-    <div class="stat"><div class="k">Profile</div><div class="v">{{ cfg.profile }}{{ ' + -sV' if cfg.version_detect }}</div></div>
+    <div class="stat"><div class="k">Engine</div><div class="v">{{ engines[engine] }}<div class="small mut">{{ cfg.profile }}{{ ' + -sV' if cfg.version_detect }}</div></div></div>
   </div>
   <form method="post" action="{{ url_for('scan_now') }}"><button {{ 'disabled' if state.running }}>{{ 'Scanning…' if state.running else 'Scan now' }}</button></form>
 </div>
@@ -38,7 +38,9 @@
       <td class="hide-sm small">{{ 'indexed' if p.in_shodan else '-' }}</td>
     </tr>{% endfor %}
   </table>{% endif %}
-  <p class="small mut">TCP connect scan from Google Cloud ({{ s.profile }}). UDP services (e.g. WireGuard) are not detected. <a href="{{ url_for('scan_detail', scan_id=s.id) }}">Raw output</a></p>
+  <p class="small mut">{{ s.engine or 'TCP connect (Cloud Run)' }} · {{ s.profile }}.
+    {% if 'UDP' in (s.engine or '') %}UDP ports only count when they reply; WireGuard never does.{% else %}UDP services are not checked.{% endif %}
+    <a href="{{ url_for('scan_detail', scan_id=s.id) }}">Raw output</a></p>
 </div>
 
 <div class="card">

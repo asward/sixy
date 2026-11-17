@@ -1,8 +1,11 @@
-"""Scan orchestration: detect WAN IP, run nmap in Cloud Run, parse, enrich,
-compare with Shodan InternetDB, store, and notify on changes."""
+"""Scan orchestration: detect WAN IP, run nmap (Cloud Run job or locally,
+typically inside a VPN container's network), parse, enrich, compare with
+Shodan InternetDB, store, and notify on changes."""
 import ipaddress
 import os
 import re
+import socket
+import subprocess
 import threading
 import time
 import traceback
@@ -12,42 +15,98 @@ import requests
 from . import store
 from .ports import describe, RISK_ORDER
 
-BACKEND = os.environ.get("SCAN_BACKEND", "cloudrun")  # cloudrun | demo
+# Env override (mainly SCAN_BACKEND=demo); otherwise the "engine" setting decides.
+BACKEND = os.environ.get("SCAN_BACKEND", "")
+ENGINES = {"cloudrun": "Google Cloud Run", "local": "Local (via VPN sidecar)", "demo": "Demo"}
 _scan_lock = threading.Lock()
 state = {"running": False, "next_run": None, "last_error": ""}
 
 IP_SOURCES = ["https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"]
 
 
+def engine(cfg) -> str:
+    return BACKEND or cfg.get("engine") or "cloudrun"
+
+
 # ---------------- helpers ----------------
-def detect_wan_ip() -> str:
-    for url in IP_SOURCES:
+def detect_wan_ip(lookup_url: str = "") -> str:
+    """Public IP as seen by whatever network this container egresses through."""
+    for url in ([lookup_url] if lookup_url else IP_SOURCES):
         try:
             ip = requests.get(url, timeout=8).text.strip()
             if ipaddress.ip_address(ip).is_global:
                 return ip
         except Exception:
             continue
-    raise RuntimeError("Could not determine WAN IP from any lookup service.")
+    where = lookup_url or "any lookup service"
+    raise RuntimeError(f"Could not determine WAN IP from {where}.")
 
 
 def resolve_target(cfg) -> str:
+    """Target to scan: override (IP or DDNS hostname, resolved to an IP) or detected WAN IP."""
     t = (cfg.get("target_override") or "").strip()
     if not t:
-        return detect_wan_ip()
+        return detect_wan_ip(cfg.get("ip_lookup_url", ""))
     if not re.fullmatch(r"[A-Za-z0-9.\-:]+", t) or t.startswith("-"):
         raise ValueError("Target override must be a plain IP or hostname.")
-    return t
+    try:
+        return str(ipaddress.ip_address(t))
+    except ValueError:
+        pass
+    try:
+        return socket.getaddrinfo(t, None, socket.AF_INET)[0][4][0]
+    except OSError as e:
+        raise RuntimeError(f"Could not resolve {t}: {e}") from e
 
 
-def nmap_args(cfg, target):
-    args = ["-Pn", "-sT", "-T4", "--max-retries", "2", "--open", "-oG", "-"]
-    args += {"top100": ["--top-ports", "100"], "all": ["-p-"]}.get(cfg["profile"], ["--top-ports", "1000"])
+def check_vantage_point(cfg, target):
+    """Local engine only: refuse to scan from inside the target network.
+
+    If this container's egress IP equals the target, the scan would either loop
+    back through the router (no VPN -> hairpin, misleading results) or the WAN IP
+    was detected through the VPN (target = the VPN server)."""
+    egress = detect_wan_ip()
+    if egress != target:
+        return egress
+    if cfg.get("target_override"):
+        raise RuntimeError(
+            f"Sixy's traffic leaves from {egress}, the IP it is about to scan, so it is not behind a VPN "
+            "and would scan your network from the inside (NAT hairpin). Run Sixy in the gluetun "
+            "container's network (see README).")
+    raise RuntimeError(
+        f"The detected WAN IP ({egress}) is also the IP Sixy scans from, so it is either the VPN's exit "
+        "IP or Sixy isn't behind a VPN. With the local engine, set Target to your DDNS hostname "
+        "(or a WAN IP lookup URL that bypasses the VPN), and run Sixy in the gluetun network.")
+
+
+def _port_args(cfg):
+    return {"top100": ["--top-ports", "100"], "all": ["-p-"]}.get(cfg["profile"], ["--top-ports", "1000"])
+
+
+def nmap_args(cfg, target, scan_type="-sT"):
+    args = ["-Pn", scan_type, "-T4", "--max-retries", "2", "--open", "-oG", "-"]
+    if scan_type != "-sT":
+        args.insert(0, "--privileged")  # file capability cap_net_raw instead of root
+    args += _port_args(cfg)
     if cfg.get("version_detect"):
         args += ["-sV", "--version-light"]
     return args + [target]
 
 
+def udp_ports(cfg):
+    return [int(p) for p in cfg.get("udp_ports") or []]
+
+
+def nmap_udp_args(cfg, target):
+    ports = ",".join(str(p) for p in udp_ports(cfg))
+    args = ["--privileged", "-Pn", "-sU", "-T4", "--max-retries", "2", "--open", "-oG", "-", "-p", ports]
+    if cfg.get("version_detect"):
+        args += ["-sV", "--version-light"]
+    return args + [target]
+
+
+# Only "open" counts. UDP "open|filtered" just means no reply, which is what a
+# firewalled port (and WireGuard, by design) looks like too.
 PORT_RE = re.compile(r"(\d+)/(open)/(tcp|udp)/([^/]*)/([^/]*)/([^/]*)/([^/]*)/")
 
 
@@ -121,13 +180,49 @@ def _demo_scan(args):
     ]
 
 
-def _cloudrun_scan(cfg, args):
+def _cloudrun_scan(cfg, target):
     from .gcp import CloudRunScanner
     if not store.key_info():
         raise RuntimeError("No Google service-account key uploaded yet (Settings).")
     sc = CloudRunScanner(store.KEY_PATH, cfg["region"], cfg["job_name"])
     timeout = 3600 if cfg["profile"] == "all" else 900
-    return sc.run_scan(args, timeout_s=timeout)
+    exec_name, lines = sc.run_scan(nmap_args(cfg, target), timeout_s=timeout)
+    return exec_name, lines, "TCP connect (Cloud Run)"
+
+
+RAW_DENIED = ("Couldn't open a raw socket", "requires root privileges", "Operation not permitted")
+NMAP_BIN = os.environ.get("NMAP_BIN", "nmap")
+
+
+def _run_nmap(args, timeout):
+    try:
+        p = subprocess.run([NMAP_BIN, *args], capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as e:
+        raise RuntimeError("nmap is not installed in this container.") from e
+    out = p.stdout.splitlines()
+    raw_denied = any(m in p.stderr or m in p.stdout for m in RAW_DENIED)
+    if p.returncode != 0 and not raw_denied:
+        raise RuntimeError(f"nmap exited {p.returncode}: {p.stderr.strip()[-500:]}")
+    return out, raw_denied, p.stderr
+
+
+def _local_scan(cfg, target):
+    """nmap inside this container. Prefers SYN + UDP (needs cap_net_raw on the
+    nmap binary); falls back to TCP connect if raw sockets are unavailable."""
+    timeout = 3 * 3600 if cfg["profile"] == "all" else 1800
+    lines, denied, _ = _run_nmap(nmap_args(cfg, target, "-sS"), timeout)
+    method = "SYN"
+    if denied:
+        store.add_event("warn", "Raw sockets unavailable (missing NET_RAW / no-new-privileges?) - "
+                                "using TCP connect scan, UDP skipped.")
+        lines, _, _ = _run_nmap(nmap_args(cfg, target, "-sT"), timeout)
+        return "local", lines, "TCP connect (local)"
+    if udp_ports(cfg):
+        udp_lines, denied, _ = _run_nmap(nmap_udp_args(cfg, target), 900)
+        if not denied:
+            lines += udp_lines
+            method += " + UDP"
+    return "local", lines, f"{method} (local)"
 
 
 # ---------------- main entry ----------------
@@ -139,16 +234,25 @@ def run_scan(trigger="schedule"):
     scan_id = None
     prev = store.latest_scan()
     try:
+        eng = engine(cfg)
         target = resolve_target(cfg)
         scan_id = store.new_scan(target, cfg["profile"])
-        args = nmap_args(cfg, target)
-        exec_name, lines = _demo_scan(args) if BACKEND == "demo" else _cloudrun_scan(cfg, args)
+        if eng == "demo":
+            exec_name, lines = _demo_scan(nmap_args(cfg, target))
+            method = "Demo data"
+        elif eng == "local":
+            vantage = check_vantage_point(cfg, target)
+            exec_name, lines, method = _local_scan(cfg, target)
+            method += f" from {vantage}"
+        else:
+            exec_name, lines, method = _cloudrun_scan(cfg, target)
+        store.update_scan(scan_id, engine=method)
         seen_ip, ports = parse_greppable(lines)
         ip = seen_ip or target
         shodan = internetdb(ip)
         allowed = set(cfg.get("allowed_ports") or [])
         ports = enrich(ports, allowed, shodan)
-        unexpected = [p["port"] for p in ports if not p["allowed"]]
+        unexpected = sorted({p["port"] for p in ports if not p["allowed"]})
         status = "alert" if unexpected else "ok"
         store.update_scan(scan_id, finished=store.now_iso(), ip=ip, status=status, execution=exec_name,
                           ports=ports, unexpected=unexpected, shodan=shodan, raw="\n".join(lines))
@@ -206,7 +310,7 @@ def scheduler_loop():
     while True:
         cfg = store.load_config()
         interval = max(15, int(cfg.get("interval_minutes") or 60)) * 60
-        ready = cfg.get("schedule_enabled") and (BACKEND == "demo" or cfg.get("job_deployed"))
+        ready = cfg.get("schedule_enabled") and (engine(cfg) != "cloudrun" or cfg.get("job_deployed"))
         state["next_run"] = (last + interval) if ready else None
         if ready and time.time() >= last + interval:
             last = time.time()

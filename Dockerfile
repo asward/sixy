@@ -2,6 +2,15 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data
 WORKDIR /srv
+
+# nmap for the local (VPN sidecar) engine. cap_net_raw on the binary lets the
+# non-root user run SYN/UDP scans (Docker grants NET_RAW to containers by default).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends nmap libcap2-bin \
+ && setcap cap_net_raw+eip "$(command -v nmap)" \
+ && apt-get purge -y libcap2-bin && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app

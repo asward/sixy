@@ -25,6 +25,8 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: requirements*.txt
+      - name: Install nmap (for the real-scan test)
+        run: sudo apt-get update -q && sudo apt-get install -y -q nmap
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -v
 
@@ -56,6 +58,27 @@ jobs:
           done
           echo "scan status: $STATUS"
           test "$STATUS" = "alert"
+      - name: Local engine scans as non-root inside the container (raw sockets via file capability)
+        run: |
+          docker run -d --name sixy-local -p 8081:8080 -e ADMIN_PASSWORD=ci-pass sixy:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8081/livez && break; sleep 1; done
+          test "$(docker exec sixy-local id -u)" != 0
+          curl -fsS -c jar2 -o /dev/null -d "password=ci-pass&next=/" localhost:8081/login
+          # target 127.0.0.1 differs from the runner's egress IP, so the vantage check passes;
+          # Sixy's own UI on 8080 (in nmap's top-100) must show up as an open port.
+          curl -fsS -b jar2 -o /dev/null -X POST localhost:8081/settings \
+            --data "engine=local&udp_ports=&allowed_ports=&profile=top100&interval_minutes=60&target_override=127.0.0.1"
+          curl -fsS -b jar2 -o /dev/null -X POST localhost:8081/scan
+          for i in $(seq 1 90); do
+            RESULT=$(curl -s -u :ci-pass localhost:8081/api/status | python3 -c "
+          import json,sys; d=json.load(sys.stdin); l=d['latest']
+          print('' if not l else f\"{l['status']}|{l['engine']}|{l['unexpected']}\") if not d['last_error'] else print('ERR '+d['last_error'])")
+            [ -n "$RESULT" ] && break; sleep 2
+          done
+          echo "result: $RESULT"
+          case "$RESULT" in alert\|SYN*\|*8080*) echo ok ;; *) exit 1 ;; esac
       - name: Container logs
         if: always()
-        run: docker logs sixy
+        run: |
+          docker logs sixy || true
+          docker logs sixy-local || true

@@ -134,7 +134,15 @@ def ts(epoch):
 
 def ctx():
     cfg = store.load_config()
-    return dict(cfg=cfg, key=store.key_info(), state=scanner.state, backend=scanner.BACKEND)
+    return dict(cfg=cfg, key=store.key_info(), state=scanner.state, backend=scanner.BACKEND,
+                engine=scanner.engine(cfg), engines=scanner.ENGINES)
+
+
+def _port_list(text):
+    ports = sorted({int(p) for p in (text or "").replace(",", " ").split() if p})
+    if any(not 0 < p < 65536 for p in ports):
+        raise ValueError
+    return ports
 
 
 # ---------- pages ----------
@@ -173,14 +181,23 @@ def save_settings():
     cfg = store.load_config()
     f = request.form
     try:
-        allowed = sorted({int(p) for p in f.get("allowed_ports", "").replace(",", " ").split() if p})
-        if any(not 0 < p < 65536 for p in allowed):
-            raise ValueError
+        allowed = _port_list(f.get("allowed_ports", ""))
+        udp = _port_list(f.get("udp_ports", "")) if "udp_ports" in f else cfg["udp_ports"]
     except ValueError:
-        flash("Allowed ports must be numbers 1-65535.", "err")
+        flash("Ports must be numbers 1-65535.", "err")
         return redirect(url_for("settings"))
-    redeploy = f.get("region") != cfg["region"] or f.get("image") != cfg["image"] or f.get("job_name") != cfg["job_name"]
+    lookup = f.get("ip_lookup_url", cfg.get("ip_lookup_url", "")).strip()
+    if lookup and not lookup.startswith(("http://", "https://")):
+        flash("WAN IP lookup URL must start with http:// or https://", "err")
+        return redirect(url_for("settings"))
+    eng = f.get("engine", cfg.get("engine", "cloudrun"))
+    if eng not in ("cloudrun", "local"):
+        eng = "cloudrun"
+    redeploy = any(f.get(k, cfg[k]).strip() != cfg[k] for k in ("region", "image", "job_name"))
     cfg.update(
+        engine=eng,
+        udp_ports=udp,
+        ip_lookup_url=lookup,
         region=f.get("region", cfg["region"]).strip(),
         job_name=f.get("job_name", cfg["job_name"]).strip(),
         image=f.get("image", cfg["image"]).strip(),
@@ -251,7 +268,8 @@ def api_status():
     return jsonify({
         "running": scanner.state["running"],
         "last_error": scanner.state["last_error"],
-        "latest": s and {k: s[k] for k in ("id", "finished", "ip", "status", "unexpected", "ports")},
+        "engine": scanner.engine(store.load_config()),
+        "latest": s and {k: s.get(k) for k in ("id", "finished", "ip", "status", "engine", "unexpected", "ports")},
     })
 
 

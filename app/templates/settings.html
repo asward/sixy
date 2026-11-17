@@ -1,5 +1,35 @@
 {% extends "base.html" %}
 {% block body %}
+<form method="post" action="{{ url_for('save_settings') }}" id="settings"></form>
+
+<div class="card">
+  <h2>Scan engine</h2>
+  {% if backend == 'demo' %}<p class="small mut">Demo mode is forced by <span class="mono">SCAN_BACKEND=demo</span>; this choice applies once it's removed.</p>{% endif %}
+  <label class="chk"><input form="settings" type="radio" name="engine" value="cloudrun" {{ 'checked' if cfg.engine != 'local' }}>
+    <span><b>Google Cloud Run</b> — scans from Google's network on the free tier. TCP only. Needs a Google project (below).</span></label>
+  <label class="chk"><input form="settings" type="radio" name="engine" value="local" {{ 'checked' if cfg.engine == 'local' }}>
+    <span><b>Local, through a VPN container</b> — nmap runs inside Sixy, sharing a <span class="mono">gluetun</span> container's network so probes leave via your VPN. SYN + UDP, any port range, no cloud account. See README for the compose setup.</span></label>
+  <p><button form="settings">Save</button></p>
+</div>
+
+{% if cfg.engine == 'local' %}
+<div class="card">
+  <h2>Local engine (VPN)</h2>
+  <div class="row">
+    <div>
+      <label>UDP ports to probe</label>
+      <input form="settings" name="udp_ports" value="{{ cfg.udp_ports|join(', ') }}">
+      <div class="help">Only ports that answer count as open. WireGuard never answers, so it can't be detected. Leave empty to skip UDP.</div>
+    </div>
+    <div>
+      <label>WAN IP lookup URL (optional)</label>
+      <input form="settings" name="ip_lookup_url" value="{{ cfg.ip_lookup_url }}" placeholder="http://192.168.1.10:8000/myip">
+      <div class="help">Behind a VPN, "what's my IP" returns the VPN's IP. Either set <b>Target</b> below to your DDNS hostname, or point this at a URL outside the tunnel that returns your home IP as plain text.</div>
+    </div>
+  </div>
+  <p class="small mut">Before every scan Sixy checks the IP its own traffic comes from. If that equals the target, it refuses to scan: you'd be scanning from inside your network (NAT hairpin) instead of from the internet.</p>
+</div>
+{% else %}
 <div class="card">
   <h2>1 · Google Cloud setup (one time, ~3 minutes)</h2>
   <p class="small">In the <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Cloud Console</a>, create a project and <a href="https://console.cloud.google.com/billing/linkedaccount" target="_blank" rel="noopener">link billing</a> (required for Cloud Run; usage stays inside the free tier — add a $1 budget alert to be safe). Then open <a href="https://shell.cloud.google.com/" target="_blank" rel="noopener">Cloud Shell</a> and paste:</p>
@@ -32,19 +62,19 @@ cloudshell download sixy-key.json</pre>
     <div class="help">Creates job <span class="mono">{{ cfg.job_name }}</span> in <span class="mono">{{ cfg.region }}</span> running the public <span class="mono">{{ cfg.image }}</span> image. Nothing is exposed publicly; scans only run when this container triggers them.</div>
   </form>
 </div>
+{% endif %}
 
-<form method="post" action="{{ url_for('save_settings') }}">
 <div class="card">
-  <h2>3 · Scan settings</h2>
+  <h2>Scan settings</h2>
   <div class="row">
     <div>
       <label>Allowed ports</label>
-      <input name="allowed_ports" value="{{ cfg.allowed_ports|join(', ') }}" placeholder="e.g. 443, 32400">
-      <div class="help">Ports you intentionally forward. Anything else open = alert.</div>
+      <input form="settings" name="allowed_ports" value="{{ cfg.allowed_ports|join(', ') }}" placeholder="e.g. 443, 32400">
+      <div class="help">Ports you intentionally forward (TCP or UDP). Anything else open = alert.</div>
     </div>
     <div>
-      <label>Port range</label>
-      <select name="profile">
+      <label>TCP port range</label>
+      <select form="settings" name="profile">
         <option value="top100" {{ 'selected' if cfg.profile=='top100' }}>Top 100 ports (~20 s)</option>
         <option value="top1000" {{ 'selected' if cfg.profile=='top1000' }}>Top 1000 ports (~1 min)</option>
         <option value="all" {{ 'selected' if cfg.profile=='all' }}>All 65,535 ports (5-20 min — use a daily interval)</option>
@@ -52,35 +82,36 @@ cloudshell download sixy-key.json</pre>
     </div>
     <div>
       <label>Interval (minutes)</label>
-      <input type="number" name="interval_minutes" min="15" value="{{ cfg.interval_minutes }}">
-      <div class="help">Free tier fits hourly top-1000, or daily full scans.</div>
+      <input form="settings" type="number" name="interval_minutes" min="15" value="{{ cfg.interval_minutes }}">
+      <div class="help">Cloud Run free tier fits hourly top-1000, or daily full scans.</div>
     </div>
     <div>
-      <label>Target override</label>
-      <input name="target_override" value="{{ cfg.target_override }}" placeholder="blank = auto-detect WAN IP">
-      <div class="help">Optional DDNS hostname or IP. Leave blank if this container runs at home.</div>
+      <label>Target</label>
+      <input form="settings" name="target_override" value="{{ cfg.target_override }}" placeholder="blank = auto-detect WAN IP">
+      <div class="help">Optional DDNS hostname or IP (resolved before each scan). Recommended for the local engine.</div>
     </div>
   </div>
-  <label class="chk"><input type="checkbox" name="version_detect" {{ 'checked' if cfg.version_detect }}> Identify service versions (nmap -sV, adds ~30 s)</label>
-  <label class="chk"><input type="checkbox" name="schedule_enabled" {{ 'checked' if cfg.schedule_enabled }}> Run on schedule</label>
+  <label class="chk"><input form="settings" type="checkbox" name="version_detect" {{ 'checked' if cfg.version_detect }}> Identify service versions (nmap -sV, adds ~30 s)</label>
+  <label class="chk"><input form="settings" type="checkbox" name="schedule_enabled" {{ 'checked' if cfg.schedule_enabled }}> Run on schedule</label>
 </div>
 
 <div class="card">
   <h2>Notifications</h2>
   <label>Apprise URLs (one per line)</label>
-  <textarea name="notify_urls" rows="3" placeholder="ntfys://ntfy.sh/my-wan-topic&#10;tgram://bottoken/chatid&#10;mailtos://user:pass@gmail.com">{{ cfg.notify_urls }}</textarea>
+  <textarea form="settings" name="notify_urls" rows="3" placeholder="ntfys://ntfy.sh/my-wan-topic&#10;tgram://bottoken/chatid&#10;mailtos://user:pass@gmail.com">{{ cfg.notify_urls }}</textarea>
   <div class="help">Any <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener">Apprise</a> target: ntfy, Telegram, Discord, Slack, Pushover, email… Sent when ports open/close, IP changes, new CVEs appear, or a scan fails.</div>
-  <label class="chk"><input type="checkbox" name="notify_each_alert" {{ 'checked' if cfg.notify_each_alert }}> Also re-notify on every scan while unexpected ports stay open</label>
+  <label class="chk"><input form="settings" type="checkbox" name="notify_each_alert" {{ 'checked' if cfg.notify_each_alert }}> Also re-notify on every scan while unexpected ports stay open</label>
 </div>
 
+{% if cfg.engine != 'local' %}
 <div class="card">
-  <h2>Advanced</h2>
+  <h2>Advanced (Cloud Run)</h2>
   <div class="row">
-    <div><label>Region</label><input name="region" value="{{ cfg.region }}"><div class="help">Free tier applies in Tier-1 regions (us-west1, us-central1, us-east1…).</div></div>
-    <div><label>Job name</label><input name="job_name" value="{{ cfg.job_name }}"></div>
+    <div><label>Region</label><input form="settings" name="region" value="{{ cfg.region }}"><div class="help">Free tier applies in Tier-1 regions (us-west1, us-central1, us-east1…).</div></div>
+    <div><label>Job name</label><input form="settings" name="job_name" value="{{ cfg.job_name }}"></div>
   </div>
-  <label>Scanner image</label><input name="image" value="{{ cfg.image }}">
+  <label>Scanner image</label><input form="settings" name="image" value="{{ cfg.image }}">
 </div>
-<p><button>Save settings</button></p>
-</form>
+{% endif %}
+<p><button form="settings">Save settings</button></p>
 {% endblock %}
